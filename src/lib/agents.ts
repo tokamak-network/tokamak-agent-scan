@@ -40,7 +40,7 @@ async function fetchMetadata(uri: string): Promise<AgentMetadata | null> {
       return JSON.parse(decoded);
     }
 
-    const res = await fetch(resolved, { next: { revalidate: 300 } });
+    const res = await fetch(resolved, { cache: "no-store" });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -165,15 +165,13 @@ export async function getRecentAgents(
     const agents = await Promise.all(
       recentLogs.map(async (log) => {
         const agentId = log.args.agentId!;
-        const owner = log.args.owner!;
-        const agentURI = log.args.agentURI || "";
-        const metadata = agentURI ? await fetchMetadata(agentURI) : null;
-
-        return { agentId, owner, agentURI, metadata, chainId } as Agent;
+        // Read current tokenURI from contract (not from event log, which is stale after setAgentURI)
+        const agent = await getAgent(agentId, chainId);
+        return agent;
       })
     );
 
-    return agents;
+    return agents.filter((a): a is Agent => a !== null);
   } catch (error) {
     console.error("Error fetching recent agents:", error);
     return [];
