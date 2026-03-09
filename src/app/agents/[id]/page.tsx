@@ -11,8 +11,9 @@ import { SUPPORTED_CHAINS } from "@/lib/chains";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import AgentDetailTabs from "@/components/AgentDetailTabs";
+import { EditAgentButton } from "@/components/EditAgentButton";
 
-export const revalidate = 60;
+export const revalidate = 0;
 
 /* ── Helpers ── */
 
@@ -92,12 +93,18 @@ export default async function AgentDetailPage({
   });
   const uniqueProtocols = [...new Set(protocols)];
 
-  // Collect all skills and domains from services
+  // Collect all skills and domains from both top-level and services
   const allSkills = [
-    ...new Set(meta?.services?.flatMap((svc) => svc.skills ?? []) ?? []),
+    ...new Set([
+      ...(meta?.skills ?? []),
+      ...(meta?.services?.flatMap((svc) => svc.skills ?? []) ?? []),
+    ]),
   ];
   const allDomains = [
-    ...new Set(meta?.services?.flatMap((svc) => svc.domains ?? []) ?? []),
+    ...new Set([
+      ...(meta?.domains ?? []),
+      ...(meta?.services?.flatMap((svc) => svc.domains ?? []) ?? []),
+    ]),
   ];
 
   /* ── Tab Contents ── */
@@ -588,12 +595,15 @@ export default async function AgentDetailPage({
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-12">
-      <Link
-        href="/agents"
-        className="mb-6 inline-block text-sm text-gray-400 hover:text-white"
-      >
-        &larr; Back to Agents
-      </Link>
+      <div className="mb-6 flex items-center justify-between">
+        <Link
+          href="/agents"
+          className="text-sm text-gray-400 hover:text-white"
+        >
+          &larr; Back to Agents
+        </Link>
+        <EditAgentButton agentId={id} ownerAddress={agent.owner} />
+      </div>
 
       {/* ════════ Header (always visible) ════════ */}
       <div className="mb-8 flex items-start gap-6">

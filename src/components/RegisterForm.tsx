@@ -76,7 +76,7 @@ const INITIAL_FORM: FormData = {
   tags: [],
   tagInput: "",
   active: false,
-  storageMethod: "onchain",
+  storageMethod: "ipfs",
   x402Support: false,
   website: "",
   twitter: "",
@@ -669,18 +669,18 @@ const STORAGE_OPTIONS: {
   cons: string;
 }[] = [
   {
-    value: "onchain",
-    label: "On-Chain (Data URI)",
-    desc: "Metadata is fully encoded and stored on-chain as a base64 data URI.",
-    pros: "Fully decentralized, always available, no external dependency",
-    cons: "Higher gas cost proportional to metadata size",
-  },
-  {
     value: "ipfs",
     label: "IPFS (via Pinata)",
     desc: "Metadata is automatically uploaded to IPFS. Only the content-addressed CID is stored on-chain.",
     pros: "Low gas cost, content-addressed (immutable), decentralized",
     cons: "Depends on IPFS pinning service for availability",
+  },
+  {
+    value: "onchain",
+    label: "On-Chain (Data URI)",
+    desc: "Metadata is fully encoded and stored on-chain as a base64 data URI.",
+    pros: "Fully decentralized, always available, no external dependency",
+    cons: "Higher gas cost proportional to metadata size",
   },
 ];
 
@@ -835,7 +835,7 @@ function Step7Review({ form, metadata, walletAddress }: {
   return (
     <div className="space-y-4">
       <p className="text-sm text-gray-400">
-        Review all information before submitting. This will be recorded on-chain permanently.
+        Review all information before submitting. The updated metadata will be recorded on-chain.
       </p>
 
       <ReviewSection title="Basic Info">
@@ -962,9 +962,96 @@ function Step7Review({ form, metadata, walletAddress }: {
   );
 }
 
+// ─── Helpers: Convert AgentMetadata → FormData ──────────
+
+function metadataToFormData(
+  meta: import("@/types/agent").AgentMetadata
+): FormData {
+  const oasfSkills = OASF_SKILLS.flatMap((c) => c.items);
+  const oasfDomains = OASF_DOMAINS.flatMap((c) => c.items);
+
+  const allSkills = [
+    ...new Set([
+      ...(meta.skills ?? []),
+      ...(meta.services?.flatMap((s) => s.skills ?? []) ?? []),
+    ]),
+  ];
+  const allDomains = [
+    ...new Set([
+      ...(meta.domains ?? []),
+      ...(meta.services?.flatMap((s) => s.domains ?? []) ?? []),
+    ]),
+  ];
+
+  const skills = allSkills.filter((s) => oasfSkills.includes(s));
+  const customSkills = allSkills
+    .filter((s) => !oasfSkills.includes(s))
+    .map((s) => (s.startsWith("custom/") ? s.slice(7) : s));
+
+  const domains = allDomains.filter((d) => oasfDomains.includes(d));
+  const customDomains = allDomains
+    .filter((d) => !oasfDomains.includes(d))
+    .map((d) => (d.startsWith("custom/") ? d.slice(7) : d));
+
+  const services: ServiceEntry[] = [
+    {
+      name: "MCP",
+      endpoint:
+        meta.services?.find((s) => s.name.toUpperCase().includes("MCP"))
+          ?.endpoint ?? "",
+      version:
+        meta.services?.find((s) => s.name.toUpperCase().includes("MCP"))
+          ?.version ?? "",
+    },
+    {
+      name: "A2A",
+      endpoint:
+        meta.services?.find((s) => s.name.toUpperCase().includes("A2A"))
+          ?.endpoint ?? "",
+      version:
+        meta.services?.find((s) => s.name.toUpperCase().includes("A2A"))
+          ?.version ?? "",
+    },
+  ];
+
+  return {
+    name: meta.name ?? "",
+    description: meta.description ?? "",
+    image: meta.image ?? "",
+    services,
+    skills,
+    customSkills,
+    customSkillInput: "",
+    domains,
+    customDomains,
+    customDomainInput: "",
+    supportedTrust: meta.supportedTrust ?? [],
+    tags: meta.tags ?? [],
+    tagInput: "",
+    active: meta.active ?? false,
+    storageMethod: "ipfs",
+    x402Support: meta.x402Support ?? false,
+    website: meta.socials?.website ?? "",
+    twitter: meta.socials?.twitter ?? "",
+    github: meta.socials?.github ?? "",
+    discord: meta.socials?.discord ?? "",
+    email: meta.socials?.email ?? "",
+  };
+}
+
 // ─── Main Wizard ─────────────────────────────────────────
 
-export function RegisterForm() {
+interface RegisterFormProps {
+  mode?: "register" | "edit";
+  editAgentId?: string;
+  initialMetadata?: import("@/types/agent").AgentMetadata | null;
+}
+
+export function RegisterForm({
+  mode = "register",
+  editAgentId,
+  initialMetadata,
+}: RegisterFormProps = {}) {
   const router = useRouter();
   const { isConnected } = useConnection();
   const { address } = useAccount();
@@ -972,8 +1059,14 @@ export function RegisterForm() {
   const { switchChain } = useSwitchChain();
   const { writeContractAsync, isPending } = useWriteContract();
 
+  const isEdit = mode === "edit";
+
   const [step, setStep] = useState(1);
-  const [form, setForm] = useState<FormData>(INITIAL_FORM);
+  const [form, setForm] = useState<FormData>(
+    isEdit && initialMetadata
+      ? metadataToFormData(initialMetadata)
+      : INITIAL_FORM
+  );
   const [txHash, setTxHash] = useState<`0x${string}` | undefined>();
   const [agentId, setAgentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1017,6 +1110,8 @@ export function RegisterForm() {
         skills: allSkills.length > 0 ? allSkills : undefined,
         domains: allDomains.length > 0 ? allDomains : undefined,
       })),
+    skills: allSkills.length > 0 ? allSkills : undefined,
+    domains: allDomains.length > 0 ? allDomains : undefined,
     active: form.active,
     supportedTrust: form.supportedTrust,
     tags: form.tags,
@@ -1070,6 +1165,36 @@ export function RegisterForm() {
 
       const { identity } = getRegistryAddresses(DEFAULT_CHAIN.id);
 
+      if (isEdit && editAgentId) {
+        // ─── Edit mode: call setAgentURI ───
+        const hash = await writeContractAsync({
+          address: identity,
+          abi: identityRegistryAbi,
+          functionName: "setAgentURI",
+          args: [BigInt(editAgentId), agentUri],
+          chainId: DEFAULT_CHAIN.id,
+        });
+
+        setTxHash(hash);
+
+        const { createPublicClient, http } = await import("viem");
+        const client = createPublicClient({ chain: DEFAULT_CHAIN, transport: http() });
+        await client.waitForTransactionReceipt({ hash });
+
+        // Revalidate cached pages so updated metadata is shown immediately
+        await fetch("/api/revalidate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: `/agents/${editAgentId}` }),
+        }).catch(() => {});
+
+        setAgentId(editAgentId);
+        router.push(`/agents/${editAgentId}`);
+        router.refresh();
+        return;
+      }
+
+      // ─── Register mode: call register ───
       // Use inline ABI to avoid ambiguity with register() overloads
       const hash = await writeContractAsync({
         address: identity,
@@ -1157,10 +1282,14 @@ export function RegisterForm() {
     return (
       <div className="mx-auto max-w-lg rounded-xl border border-green-800/50 bg-green-900/10 p-8 text-center">
         <div className="mb-4 text-5xl">&#10003;</div>
-        <h2 className="mb-2 text-xl font-bold text-green-400">Agent Registered!</h2>
+        <h2 className="mb-2 text-xl font-bold text-green-400">
+          {isEdit ? "Agent Updated!" : "Agent Registered!"}
+        </h2>
         <p className="mb-6 text-gray-400">
-          Your agent has been registered with ID{" "}
-          <span className="font-mono font-semibold text-white">{agentId}</span>
+          {isEdit ? "Your agent metadata has been updated." : (
+            <>Your agent has been registered with ID{" "}
+            <span className="font-mono font-semibold text-white">{agentId}</span></>
+          )}
         </p>
         <div className="flex justify-center gap-3">
           <a href={`/agents/${agentId}`} className="rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium transition hover:bg-blue-500">
@@ -1299,7 +1428,7 @@ export function RegisterForm() {
             disabled={isPending || isConfirming || isUploading}
             className="rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-semibold transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isUploading ? "Uploading to IPFS..." : isPending ? "Confirm in Wallet..." : isConfirming ? "Confirming..." : "Register Agent"}
+            {isUploading ? "Uploading to IPFS..." : isPending ? "Confirm in Wallet..." : isConfirming ? "Confirming..." : isEdit ? "Update Agent" : "Register Agent"}
           </button>
         )}
       </div>
