@@ -25,6 +25,8 @@ export interface AgentMetadata {
   description: string;
   image?: string;
   services?: AgentService[];
+  skills?: string[];
+  domains?: string[];
   x402Support?: boolean;
   active?: boolean;
   registrations?: AgentRegistration[];

@@ -20,6 +20,8 @@ export function buildAgentMetadata(params: {
   description: string;
   image?: string;
   services?: { name: string; endpoint: string; version?: string; skills?: string[]; domains?: string[] }[];
+  skills?: string[];
+  domains?: string[];
   active?: boolean;
   supportedTrust?: string[];
   tags?: string[];
@@ -34,6 +36,9 @@ export function buildAgentMetadata(params: {
 
   if (params.image) meta.image = params.image;
   if (params.services?.length) meta.services = params.services;
+  // Store skills/domains at top level so they persist even without service endpoints
+  if (params.skills?.length) meta.skills = params.skills;
+  if (params.domains?.length) meta.domains = params.domains;
   if (params.active) meta.active = true;
   if (params.supportedTrust?.length) meta.supportedTrust = params.supportedTrust;
   if (params.tags?.length) meta.tags = params.tags;
